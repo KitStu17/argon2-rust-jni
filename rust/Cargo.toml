@@ -1,0 +1,22 @@
+[package]
+name = "argon2-rust-jni"
+version = "0.1.0"
+edition = "2021"
+authors = ["kitstu17"]
+description = "High-performance Argon2 password hashing library with JNI bindings"
+license = "Apache-2.0"
+repository = "https://github.com/kitstu17/argon2-rust-jni"
+
+[dependencies]
+jni = "0.21"
+argon2 = {version = "0.5", features = ["std"]}
+password-hash = "0.5"
+
+[lib]
+crate-type = ["cdylib"] # 동적 라이브러리로 컴파일
+
+[profile.release]
+opt-level = 3           # 최대 최적화
+lto = true              # Link-Time Optimization
+codegen-units = 1       # 단일 코드 생성 유닛 (최적화 우선)
+strip = true            # 심볼 제거 (바이너리 크기 축소)
