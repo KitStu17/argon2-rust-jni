@@ -1,0 +1,221 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'io.github.kitstu17'
+version = '0.1.0'
+
+// Java 설정
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+    testImplementation 'org.assertj:assertj-core:3.24.2'
+}
+
+// Rust 빌드 태스크 (로컬 개발용)
+task buildRust(type: Exec) {
+    description = 'Build Rust native library for current platform'
+    group = 'build'
+    
+    workingDir 'rust'
+    
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'bash', 'build.sh', '--local'
+    } else {
+        commandLine 'bash', 'build.sh', '--local'
+    }
+}
+
+// 현재 플랫폼 라이브러리 복사 (로컬 개발용)
+task copyNatives(type: Copy, dependsOn: buildRust) {
+    description = 'Copy native library for current platform (development only)'
+    group = 'build'
+    
+    def platform = detectPlatform()
+    def libName = getNativeLibraryName()
+    
+    from("rust/target/release") {
+        include libName
+    }
+    
+    into "java/src/main/resources/natives/${platform}"
+    
+    doLast {
+        println "✅ Copied ${libName} to natives/${platform}"
+        println ""
+        println "⚠️  DEVELOPMENT BUILD WARNING ⚠️"
+        println "This JAR only includes native library for: ${platform}"
+        println ""
+        println "For production deployment:"
+        println "  1. Use GitHub Actions to build all platforms"
+        println "  2. Download JAR from GitHub Releases"
+        println "  3. Or use './gradlew buildForRelease' with pre-built natives"
+        println ""
+    }
+}
+
+// 모든 플랫폼 라이브러리 포함 (배포용)
+task copyAllNatives(type: Copy) {
+    description = 'Copy all pre-built native libraries from natives-prebuilt/'
+    group = 'build'
+    
+    onlyIf {
+        file('natives-prebuilt').exists()
+    }
+    
+    from('natives-prebuilt') {
+        include '**/*.so'
+        include '**/*.dll'
+        include '**/*.dylib'
+    }
+    
+    into 'java/src/main/resources/natives'
+    
+    doLast {
+        println "✅ Copied all pre-built native libraries"
+    }
+}
+
+// 릴리스 빌드용 (모든 플랫폼 포함)
+task buildForRelease {
+    description = 'Build JAR with all platform libraries (requires pre-built natives)'
+    group = 'build'
+    
+    dependsOn copyAllNatives
+    dependsOn build
+    
+    build.mustRunAfter copyAllNatives
+    
+    doLast {
+        println ""
+        println "✅ Release build complete with all platforms"
+        println ""
+        def nativesDir = file('java/src/main/resources/natives')
+        if (nativesDir.exists()) {
+            nativesDir.eachDir { platformDir ->
+                println "  - ${platformDir.name}:"
+                platformDir.eachFile { lib ->
+                    println "      ${lib.name}"
+                }
+            }
+        }
+        println ""
+    }
+}
+
+processResources {
+    dependsOn copyNatives
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['java/src/main/java']
+        }
+        resources {
+            srcDirs = ['java/src/main/resources']
+        }
+    }
+    test {
+        java {
+            srcDirs = ['java/src/test/java']
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    
+    systemProperty 'java.library.path', 
+        "${project.projectDir}/java/src/main/resources/natives/${detectPlatform()}"
+    
+    doFirst {
+        def platform = detectPlatform()
+        def nativeDir = file("java/src/main/resources/natives/${platform}")
+        
+        if (!nativeDir.exists() || nativeDir.listFiles().length == 0) {
+            throw new GradleException(
+                """
+                ❌ Native library not found for ${platform}!
+                
+                Run './gradlew buildRust' first to build the native library.
+                """
+            )
+        }
+    }
+}
+
+// 플랫폼 감지
+def detectPlatform() {
+    def os = System.getProperty('os.name').toLowerCase()
+    def arch = System.getProperty('os.arch').toLowerCase()
+    
+    if (os.contains('linux')) {
+        return arch.contains('aarch64') ? 'linux-aarch64' : 'linux-x86-64'
+    } else if (os.contains('mac')) {
+        return arch.contains('aarch64') ? 'darwin-aarch64' : 'darwin-x86-64'
+    } else if (os.contains('windows')) {
+        return 'windows-x86-64'
+    }
+    throw new GradleException("Unsupported platform: ${os} ${arch}")
+}
+
+def getNativeLibraryName() {
+    def os = System.getProperty('os.name').toLowerCase()
+    if (os.contains('windows')) {
+        return 'argon2_rust_jni.dll'
+    } else if (os.contains('mac')) {
+        return 'libargon2_rust_jni.dylib'
+    } else {
+        return 'libargon2_rust_jni.so'
+    }
+}
+
+// Maven 배포 설정
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = 'io.github.kitstu17'
+            artifactId = 'argon2-rust-jni'
+            version = '0.1.0'
+            
+            from components.java
+            
+            pom {
+                name = 'Argon2 Rust JNI'
+                description = 'High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot'
+                url = 'https://github.com/kitstu17/argon2-rust-jni'
+                
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+                
+                developers {
+                    developer {
+                        id = 'kitstu17'
+                        name = 'kitstu17'
+                        url = 'https://github.com/kitstu17'
+                    }
+                }
+                
+                scm {
+                    connection = 'scm:git:git://github.com/kitstu17/argon2-rust-jni.git'
+                    developerConnection = 'scm:git:ssh://github.com:kitstu17/argon2-rust-jni.git'
+                    url = 'https://github.com/kitstu17/argon2-rust-jni'
+                }
+            }
+        }
+    }
+}
