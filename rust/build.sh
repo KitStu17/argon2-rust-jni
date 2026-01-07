@@ -30,12 +30,12 @@ if command -v x86_64-linux-gnu-gcc &> /dev/null; then
 else
     echo "  ⚠️  Skipping Linux x86_64 (cross-compiler not found)"
 fi
-
+    
 # Linux ARM64
-if command -v aarch64-linux-gnu-gcc &> /dev/null; then
+    if command -v aarch64-linux-gnu-gcc &> /dev/null; then
     echo "  → Linux ARM64..."
-    cargo build --release --target aarch64-unknown-linux-gnu
-else
+        cargo build --release --target aarch64-unknown-linux-gnu
+    else
     echo "  ⚠️  Skipping Linux ARM64 (cross-compiler not found)"
 fi
 
@@ -56,7 +56,7 @@ if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
     cargo build --release --target x86_64-pc-windows-gnu
 else
     echo "  ⚠️  Skipping Windows (cross-compiler not found)"
-fi
+    fi
 
 echo ""
 echo "✅ Build complete!"

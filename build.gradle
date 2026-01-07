@@ -22,37 +22,35 @@ dependencies {
 }
 
 // Rust 빌드 태스크 (로컬 개발용)
-task buildRust(type: Exec) {
+tasks.register('buildRust', Exec) {
     description = 'Build Rust native library for current platform'
     group = 'build'
     
-    workingDir 'rust'
+    workingDir = file('rust')
     
-    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
-        commandLine 'cmd', '/c', 'bash', 'build.sh', '--local'
-    } else {
-        commandLine 'bash', 'build.sh', '--local'
-    }
+    commandLine 'cargo', 'build', '--release'
 }
 
 // 현재 플랫폼 라이브러리 복사 (로컬 개발용)
-task copyNatives(type: Copy, dependsOn: buildRust) {
+tasks.register('copyNatives', Copy) {
+    dependsOn tasks.named('buildRust')
+
     description = 'Copy native library for current platform (development only)'
     group = 'build'
-    
+
     def platform = detectPlatform()
     def libName = getNativeLibraryName()
     
     from("rust/target/release") {
         include libName
     }
-    
+
     into "java/src/main/resources/natives/${platform}"
     
     doLast {
-        println "✅ Copied ${libName} to natives/${platform}"
+        println "[v] Copied ${libName} to natives/${platform}"
         println ""
-        println "⚠️  DEVELOPMENT BUILD WARNING ⚠️"
+        println "!!!  DEVELOPMENT BUILD WARNING !!!"
         println "This JAR only includes native library for: ${platform}"
         println ""
         println "For production deployment:"
@@ -64,7 +62,7 @@ task copyNatives(type: Copy, dependsOn: buildRust) {
 }
 
 // 모든 플랫폼 라이브러리 포함 (배포용)
-task copyAllNatives(type: Copy) {
+tasks.register('copyAllNatives', Copy) {
     description = 'Copy all pre-built native libraries from natives-prebuilt/'
     group = 'build'
     
@@ -81,23 +79,21 @@ task copyAllNatives(type: Copy) {
     into 'java/src/main/resources/natives'
     
     doLast {
-        println "✅ Copied all pre-built native libraries"
+        println "[v] Copied all pre-built native libraries"
     }
 }
 
 // 릴리스 빌드용 (모든 플랫폼 포함)
-task buildForRelease {
+tasks.register('buildForRelease') {
+    dependsOn tasks.named('copyAllNatives')
+    dependsOn tasks.named('build')
+
     description = 'Build JAR with all platform libraries (requires pre-built natives)'
     group = 'build'
     
-    dependsOn copyAllNatives
-    dependsOn build
-    
-    build.mustRunAfter copyAllNatives
-    
     doLast {
         println ""
-        println "✅ Release build complete with all platforms"
+        println "[v] Release build complete with all platforms"
         println ""
         def nativesDir = file('java/src/main/resources/natives')
         if (nativesDir.exists()) {
@@ -112,8 +108,12 @@ task buildForRelease {
     }
 }
 
-processResources {
-    dependsOn copyNatives
+tasks.named('build') {
+    mustRunAfter tasks.named('copyAllNatives')
+}
+
+tasks.named('processResources').configure {
+    dependsOn tasks.named('copyNatives')
 }
 
 sourceSets {
@@ -132,9 +132,9 @@ sourceSets {
     }
 }
 
-test {
+tasks.named('test') {
     useJUnitPlatform()
-    
+
     systemProperty 'java.library.path', 
         "${project.projectDir}/java/src/main/resources/natives/${detectPlatform()}"
     
@@ -145,7 +145,7 @@ test {
         if (!nativeDir.exists() || nativeDir.listFiles().length == 0) {
             throw new GradleException(
                 """
-                ❌ Native library not found for ${platform}!
+                [x] Native library not found for ${platform}!
                 
                 Run './gradlew buildRust' first to build the native library.
                 """

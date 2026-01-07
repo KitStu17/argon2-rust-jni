@@ -21,6 +21,7 @@ dependencies = [
  "argon2",
  "jni",
  "password-hash",
+ "rand_core",
 ]
 
 [[package]]
