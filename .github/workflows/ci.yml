@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+
+# 같은 브랜치에서 연속 푸시 시 이전 빌드 취소
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Rust 린트 및 테스트
+  rust-check:
+    name: Rust Lint and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        working-directory: rust
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        working-directory: rust
+        run: cargo clippy -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: rust
+        run: cargo test --release
+
+  # Java 빌드 및 테스트
+  java-test:
+    name: Java Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: rust-check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: build/reports/tests/test/
+          retention-days: 7
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v3
+        with:
+          name: jar-linux-x86-64
+          path: build/libs/*.jar
+          retention-days: 7
+
+  # 빌드 성공 요약
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [rust-check, java-test]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          echo "========================================="
+          echo "CI Build Summary"
+          echo "========================================="
+          echo "Rust Check: ${{ needs.rust-check.result }}"
+          echo "Java Test: ${{ needs.java-test.result }}"
+          echo "========================================="
+
+          if [ "${{ needs.rust-check.result }}" != "success" ] || [ "${{ needs.java-test.result }}" != "success" ]; then
+            echo "❌ CI failed"
+            exit 1
+          else
+            echo "✅ CI passed"
+          fi

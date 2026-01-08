@@ -1,0 +1,33 @@
+name: Test Build
+
+on:
+  workflow_dispatch: # 수동 실행만
+
+jobs:
+  test-single-platform:
+    name: Quick Test (Linux only)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Build and Test
+        run: |
+          chmod +x gradlew
+          ./gradlew build test
+
+      - name: Show results
+        run: |
+          echo "✅ Build successful"
+          ls -lh build/libs/

@@ -1,0 +1,210 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  # 각 플랫폼별 네이티브 라이브러리 빌드
+  build-natives:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86-64
+            lib: libargon2_rust_jni.so
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            lib: libargon2_rust_jni.so
+            cross_compiler: gcc-aarch64-linux-gnu
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-aarch64
+            lib: libargon2_rust_jni.dylib
+
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86-64
+            lib: argon2_rust_jni.dll
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Install cross-compiler (ARM64 only)
+        if: matrix.cross_compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_compiler }}
+
+      - name: Configure Cargo (ARM64 only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/target/
+          key: ${{ matrix.platform }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Build Rust library
+        working-directory: rust
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify build
+        working-directory: rust
+        shell: bash
+        run: |
+          if [ -f "target/${{ matrix.target }}/release/${{ matrix.lib }}" ]; then
+            echo "✅ Build successful: ${{ matrix.lib }}"
+            ls -lh "target/${{ matrix.target }}/release/${{ matrix.lib }}"
+          else
+            echo "❌ Build failed: library not found"
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: native-${{ matrix.platform }}
+          path: rust/target/${{ matrix.target }}/release/${{ matrix.lib }}
+          retention-days: 30
+
+  # 모든 네이티브 라이브러리를 포함한 JAR 생성
+  package:
+    name: Package Multi-Platform JAR
+    needs: build-natives
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Download all native libraries
+        uses: actions/download-artifact@v3
+        with:
+          path: natives-temp
+
+      - name: Organize native libraries
+        run: |
+          mkdir -p java/src/main/resources/natives
+
+          # Linux x86_64
+          mkdir -p java/src/main/resources/natives/linux-x86-64
+          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || true
+
+          # Linux ARM64
+          mkdir -p java/src/main/resources/natives/linux-aarch64
+          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || true
+
+          # macOS ARM64
+          mkdir -p java/src/main/resources/natives/darwin-aarch64
+          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || true
+
+          # Windows
+          mkdir -p java/src/main/resources/natives/windows-x86-64
+          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || true
+
+          # 확인
+          echo "========================================="
+          echo "Native libraries included in JAR:"
+          echo "========================================="
+          find java/src/main/resources/natives -type f
+          echo "========================================="
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build JAR (without Rust build)
+        run: ./gradlew build -x buildRust -x copyNatives
+
+      - name: Verify JAR contents
+        run: |
+          echo "========================================="
+          echo "JAR Contents:"
+          echo "========================================="
+          jar -tf build/libs/argon2-rust-jni-*.jar | grep natives
+          echo "========================================="
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v3
+        with:
+          name: argon2-rust-jni-multiplatform
+          path: build/libs/*.jar
+          retention-days: 90
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/libs/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 빌드 요약
+  release-summary:
+    name: Release Summary
+    needs: [build-natives, package]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: argon2-rust-jni-multiplatform
+          path: artifacts
+
+      - name: Display summary
+        run: |
+          echo "========================================="
+          echo "Release Build Summary"
+          echo "========================================="
+          echo "Native libraries built:"
+          echo "  - Linux x86_64: ${{ needs.build-natives.result }}"
+          echo "  - Linux ARM64: ${{ needs.build-natives.result }}"
+          echo "  - macOS ARM64: ${{ needs.build-natives.result }}"
+          echo "  - Windows x86_64: ${{ needs.build-natives.result }}"
+          echo ""
+          echo "Package: ${{ needs.package.result }}"
+          echo ""
+          echo "Artifacts:"
+          ls -lh artifacts/
+          echo "========================================="
