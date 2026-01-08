@@ -1,12 +1,13 @@
 # Gradle
 .gradle/
 build/
-!gradle/wrapper/gradle-wrapper.jar
 *.class
 *.jar
 *.war
 *.ear
 .gradletasknamecache
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/*.jar
 
 # Rust
 rust/target/
