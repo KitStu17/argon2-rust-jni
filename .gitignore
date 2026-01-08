@@ -25,11 +25,16 @@ bin/
 
 # macOS
 .DS_Store
+Thumbs.db
 
-# Native Library
+# 네이티브 라이브러리 (빌드 산출물)
+# 주의: 개발 빌드만 제외, 최종 배포용은 포함
 java/src/main/resources/natives/**/*.so
 java/src/main/resources/natives/**/*.dylib
 java/src/main/resources/natives/**/*.dll
+
+# 하지만 .gitkeep은 유지 (빈 디렉토리 추적용)
+!java/src/main/resources/natives/**/.gitkeep
 
 # Temp Files
 *.log
