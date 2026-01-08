@@ -3,6 +3,9 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![GitHub release](https://img.shields.io/github/v/release/kitstu17/argon2-rust-jni)](https://github.com/kitstu17/argon2-rust-jni/releases)
+[![GitHub issues](https://img.shields.io/github/issues/kitstu17/argon2-rust-jni)](https://github.com/kitstu17/argon2-rust-jni/issues)
+[![GitHub stars](https://img.shields.io/github/stars/kitstu17/argon2-rust-jni)](https://github.com/kitstu17/argon2-rust-jni/stargazers)
 
 High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot, powered by Rust.
 
