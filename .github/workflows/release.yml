@@ -94,7 +94,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
           path: rust/target/${{ matrix.target }}/release/${{ matrix.lib }}
@@ -118,7 +118,7 @@ jobs:
           cache: "gradle"
 
       - name: Download all native libraries
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: natives-temp
 
@@ -164,7 +164,7 @@ jobs:
           echo "========================================="
 
       - name: Upload JAR
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: argon2-rust-jni-multiplatform
           path: build/libs/*.jar
@@ -187,7 +187,7 @@ jobs:
 
     steps:
       - name: Download package artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: argon2-rust-jni-multiplatform
           path: artifacts
