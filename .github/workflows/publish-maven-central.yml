@@ -1,0 +1,211 @@
+name: Publish to Maven Central
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (skip actual publishing)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-natives:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86-64
+            lib: libargon2_rust_jni.so
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            lib: libargon2_rust_jni.so
+            cross_compiler: gcc-aarch64-linux-gnu
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: darwin-aarch64
+            lib: libargon2_rust_jni.dylib
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86-64
+            lib: argon2_rust_jni.dll
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compiler (ARM64 only)
+        if: matrix.cross_compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_compiler }}
+
+      - name: Configure Cargo (ARM64 only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/target/
+          key: ${{ matrix.platform }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+      - name: Build Rust library
+        working-directory: rust
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify build
+        working-directory: rust
+        shell: bash
+        run: |
+          if [ -f "target/${{ matrix.target }}/release/${{ matrix.lib }}" ]; then
+            echo "✅ Build successful: ${{ matrix.lib }}"
+            ls -lh "target/${{ matrix.target }}/release/${{ matrix.lib }}"
+          else
+            echo "❌ Build failed: library not found"
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: rust/target/${{ matrix.target }}/release/${{ matrix.lib }}
+          retention-days: 7
+
+  publish:
+    name: Publish to Maven Central
+    needs: build-natives
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Download all native libraries
+        uses: actions/download-artifact@v4
+        with:
+          path: natives-temp
+
+      - name: Organize native libraries
+        run: |
+          mkdir -p java/src/main/resources/natives
+
+          # Linux x86_64
+          mkdir -p java/src/main/resources/natives/linux-x86-64
+          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || true
+
+          # Linux ARM64
+          mkdir -p java/src/main/resources/natives/linux-aarch64
+          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || true
+
+          # macOS ARM64
+          mkdir -p java/src/main/resources/natives/darwin-aarch64
+          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || true
+
+          # Windows
+          mkdir -p java/src/main/resources/natives/windows-x86-64
+          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || true
+
+          # 확인
+          echo "========================================="
+          echo "Native libraries included in JAR:"
+          echo "========================================="
+          find java/src/main/resources/natives -type f
+          echo "========================================="
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build JAR (without Rust build)
+        run: ./gradlew build -x buildRust -x copyNatives
+
+      - name: Verify JAR contents
+        run: |
+          echo "========================================="
+          echo "JAR Contents (natives only):"
+          echo "========================================="
+          jar -tf build/libs/argon2-rust-jni-*.jar | grep natives || echo "No natives found"
+          echo "========================================="
+
+      - name: Publish to Maven Central
+        if: github.event.inputs.dry_run != 'true'
+        run: ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository --no-daemon --stacktrace
+        env:
+          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
+
+      - name: Dry run - Show what would be published
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "========================================="
+          echo "DRY RUN - Would publish:"
+          echo "========================================="
+          ./gradlew tasks --group publishing
+          echo ""
+          echo "Files that would be uploaded:"
+          ls -lh build/libs/
+          echo "========================================="
+
+  publish-summary:
+    name: Publish Summary
+    needs: [build-natives, publish]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Display summary
+        run: |
+          echo "========================================="
+          echo "Maven Central Publish Summary"
+          echo "========================================="
+          echo "Build natives: ${{ needs.build-natives.result }}"
+          echo "Publish: ${{ needs.publish.result }}"
+          echo "========================================="
+
+          if [ "${{ needs.publish.result }}" == "success" ]; then
+            echo "✅ Successfully published to Maven Central!"
+            echo ""
+            echo "Note: It may take 2-4 hours to sync to Maven Central."
+            echo "Check status at: https://central.sonatype.com/"
+          else
+            echo "❌ Publishing failed. Check logs above."
+          fi
