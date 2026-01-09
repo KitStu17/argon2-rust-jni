@@ -123,53 +123,75 @@ jobs:
         with:
           path: natives-temp
 
+      - name: Debug - Show downloaded artifacts
+        run: |
+          echo "========================================="
+          echo "Downloaded artifacts:"
+          echo "========================================="
+          find natives-temp -type f
+          echo "========================================="
+
       - name: Organize native libraries
         run: |
           mkdir -p java/src/main/resources/natives
 
           # Linux x86_64
           mkdir -p java/src/main/resources/natives/linux-x86-64
-          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || true
+          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || echo "Warning: linux-x86-64 not found"
 
           # Linux ARM64
           mkdir -p java/src/main/resources/natives/linux-aarch64
-          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || true
+          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || echo "Warning: linux-aarch64 not found"
 
           # macOS ARM64
           mkdir -p java/src/main/resources/natives/darwin-aarch64
-          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || true
+          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || echo "Warning: darwin-aarch64 not found"
 
           # Windows
           mkdir -p java/src/main/resources/natives/windows-x86-64
-          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || true
+          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || echo "Warning: windows-x86-64 not found"
 
           # 확인
           echo "========================================="
-          echo "Native libraries included in JAR:"
+          echo "Native libraries organized:"
           echo "========================================="
-          find java/src/main/resources/natives -type f
+          find java/src/main/resources/natives -type f || echo "No files found"
           echo "========================================="
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build JAR (without Rust build)
-        run: ./gradlew build -x buildRust -x copyNatives
+        run: ./gradlew build -x buildRust -x copyNatives --stacktrace
 
       - name: Verify JAR contents
         run: |
           echo "========================================="
-          echo "JAR Contents (natives only):"
+          echo "JAR file info:"
           echo "========================================="
-          jar -tf build/libs/argon2-rust-jni-*.jar | grep natives || echo "No natives found"
+          ls -lh build/libs/
+          echo ""
+          echo "Checking for natives in JAR:"
+          if jar -tf build/libs/argon2-rust-jni-*.jar | grep -q natives; then
+            echo "✅ Natives found:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | grep natives
+          else
+            echo "⚠️ No natives found in JAR"
+            echo ""
+            echo "Resources in JAR:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | grep -E "\.so$|\.dll$|\.dylib$|resources/" || echo "No resources found"
+            echo ""
+            echo "First 50 entries in JAR:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | head -50
+          fi
           echo "========================================="
 
       - name: Publish to Maven Central
         if: github.event.inputs.dry_run != 'true'
-        run: ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository --no-daemon --stacktrace
+        run: ./gradlew publishMavenPublicationToCentralPortalRepository --no-daemon --stacktrace
         env:
-          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_TOKEN: ${{ secrets.CENTRAL_PORTAL_TOKEN }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
 
@@ -183,6 +205,9 @@ jobs:
           echo ""
           echo "Files that would be uploaded:"
           ls -lh build/libs/
+          echo ""
+          echo "Publication details:"
+          ./gradlew publishMavenPublicationToCentralPortalRepository --dry-run || true
           echo "========================================="
 
   publish-summary:
@@ -206,6 +231,9 @@ jobs:
             echo ""
             echo "Note: It may take 2-4 hours to sync to Maven Central."
             echo "Check status at: https://central.sonatype.com/"
+            echo ""
+            echo "Verify at:"
+            echo "https://central.sonatype.com/artifact/io.github.kitstu17/argon2-rust-jni"
           else
             echo "❌ Publishing failed. Check logs above."
           fi

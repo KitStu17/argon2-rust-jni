@@ -2,137 +2,27 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'signing'
-    id 'io.github.gradle-nexus.publish-plugin' version '1.3.0'
 }
 
 group = 'io.github.kitstu17'
 version = '0.1.1'
-
-// Java 설정
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-
-    withSourcesJar()
-    withJavadocJar()
-}
-
-// Javadoc 옵션
-tasks.named('javadoc') {
-    options.encoding = 'UTF-8'
-    options.addStringOption('Xdoclint:none', '-quiet')
-}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.assertj:assertj-core:3.24.2'
 }
 
-// Rust 빌드 태스크 (로컬 개발용)
-tasks.register('buildRust', Exec) {
-    description = 'Build Rust native library for current platform'
-    group = 'build'
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
     
-    workingDir = file('rust')
-    
-    commandLine 'cargo', 'build', '--release'
-}
-
-// 현재 플랫폼 라이브러리 복사 (로컬 개발용)
-tasks.register('copyNatives', Copy) {
-    dependsOn tasks.named('buildRust')
-
-    description = 'Copy native library for current platform (development only)'
-    group = 'build'
-
-    def platform = detectPlatform()
-    def libName = getNativeLibraryName()
-    
-    from("rust/target/release") {
-        include libName
-    }
-
-    into "java/src/main/resources/natives/${platform}"
-    
-    doLast {
-        println "[v] Copied ${libName} to natives/${platform}"
-        println ""
-        println "!!!  DEVELOPMENT BUILD WARNING !!!"
-        println "This JAR only includes native library for: ${platform}"
-        println ""
-        println "For production deployment:"
-        println "  1. Use GitHub Actions to build all platforms"
-        println "  2. Download JAR from GitHub Releases"
-        println "  3. Or use './gradlew buildForRelease' with pre-built natives"
-        println ""
-    }
-}
-
-// 모든 플랫폼 라이브러리 포함 (배포용)
-tasks.register('copyAllNatives', Copy) {
-    description = 'Copy all pre-built native libraries from natives-prebuilt/'
-    group = 'build'
-    
-    onlyIf {
-        file('natives-prebuilt').exists()
-    }
-    
-    from('natives-prebuilt') {
-        include '**/*.so'
-        include '**/*.dll'
-        include '**/*.dylib'
-    }
-    
-    into 'java/src/main/resources/natives'
-    
-    doLast {
-        println "[v] Copied all pre-built native libraries"
-    }
-}
-
-// 릴리스 빌드용 (모든 플랫폼 포함)
-tasks.register('buildForRelease') {
-    dependsOn tasks.named('copyAllNatives')
-    dependsOn tasks.named('build')
-
-    description = 'Build JAR with all platform libraries (requires pre-built natives)'
-    group = 'build'
-    
-    doLast {
-        println ""
-        println "[v] Release build complete with all platforms"
-        println ""
-        def nativesDir = file('java/src/main/resources/natives')
-        if (nativesDir.exists()) {
-            nativesDir.eachDir { platformDir ->
-                println "  - ${platformDir.name}:"
-                platformDir.eachFile { lib ->
-                    println "      ${lib.name}"
-                }
-            }
-        }
-        println ""
-    }
-}
-
-tasks.named('build') {
-    mustRunAfter tasks.named('copyAllNatives')
-}
-
-tasks.named('processResources').configure {
-    dependsOn tasks.named('copyNatives')
-}
-
-tasks.named('sourcesJar') {
-    dependsOn tasks.named('processResources')
-}
-
-tasks.named('jar') {
-    mustRunAfter tasks.named('copyNatives')
+    withSourcesJar()
+    withJavadocJar()
 }
 
 sourceSets {
@@ -151,67 +41,140 @@ sourceSets {
     }
 }
 
+// Javadoc 옵션
+tasks.named('javadoc') {
+    options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
+}
+
+// 의존성 명시
+tasks.named('processResources') {
+    dependsOn tasks.named('copyNatives')
+}
+
+tasks.named('sourcesJar') {
+    dependsOn tasks.named('processResources')
+}
+
+tasks.named('jar') {
+    mustRunAfter tasks.named('copyNatives')
+}
+
 tasks.named('test') {
     useJUnitPlatform()
-
-    systemProperty 'java.library.path', 
-        "${project.projectDir}/java/src/main/resources/natives/${detectPlatform()}"
     
-    doFirst {
-        def platform = detectPlatform()
-        def nativeDir = file("java/src/main/resources/natives/${platform}")
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+        showStandardStreams = true
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+        exceptionFormat = "full"
         
-        if (!nativeDir.exists() || nativeDir.listFiles().length == 0) {
-            throw new GradleException(
-                """
-                [x] Native library not found for ${platform}!
-                
-                Run './gradlew buildRust' first to build the native library.
-                """
-            )
+        afterSuite { desc, result ->
+            if (!desc.parent) {
+                println "\n========================================="
+                println "Test Summary"
+                println "========================================="
+                println "Total:   ${result.testCount}"
+                println "Passed:  ${result.successfulTestCount}"
+                println "Failed:  ${result.failedTestCount}"
+                println "Skipped: ${result.skippedTestCount}"
+                println "Time:    ${(result.endTime - result.startTime) / 1000.0}s"
+                println "=========================================\n"
+            }
         }
     }
 }
 
-// 플랫폼 감지
-def detectPlatform() {
-    def os = System.getProperty('os.name').toLowerCase()
-    def arch = System.getProperty('os.arch').toLowerCase()
+// Rust 빌드 태스크
+tasks.register('buildRust', Exec) {
+    description = 'Build Rust library'
+    group = 'build'
     
-    if (os.contains('linux')) {
-        return arch.contains('aarch64') ? 'linux-aarch64' : 'linux-x86-64'
-    } else if (os.contains('mac')) {
-        return arch.contains('aarch64') ? 'darwin-aarch64' : 'darwin-x86-64'
-    } else if (os.contains('windows')) {
-        return 'windows-x86-64'
-    }
-    throw new GradleException("Unsupported platform: ${os} ${arch}")
-}
-
-def getNativeLibraryName() {
-    def os = System.getProperty('os.name').toLowerCase()
-    if (os.contains('windows')) {
-        return 'argon2_rust_jni.dll'
-    } else if (os.contains('mac')) {
-        return 'libargon2_rust_jni.dylib'
+    workingDir = file('rust')
+    
+    if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+        commandLine 'cmd', '/c', 'cargo', 'build', '--release'
     } else {
-        return 'libargon2_rust_jni.so'
+        commandLine 'cargo', 'build', '--release'
     }
 }
 
-// Maven 배포 설정
+// 네이티브 라이브러리 복사
+tasks.register('copyNatives', Copy) {
+    description = 'Copy native libraries to resources'
+    group = 'build'
+    
+    dependsOn tasks.named('buildRust')
+    
+    from('rust/target/release') {
+        include '*.dll', '*.so', '*.dylib'
+    }
+    
+    into 'java/src/main/resources/natives/' + getOsPlatform()
+    
+    doFirst {
+        def targetDir = file("java/src/main/resources/natives/${getOsPlatform()}")
+        targetDir.mkdirs()
+    }
+}
+
+def getOsPlatform() {
+    def osName = System.getProperty('os.name').toLowerCase()
+    def osArch = System.getProperty('os.arch').toLowerCase()
+    
+    if (osName.contains('windows')) {
+        return 'windows-x86-64'
+    } else if (osName.contains('linux')) {
+        if (osArch.contains('aarch64') || osArch.contains('arm64')) {
+            return 'linux-aarch64'
+        }
+        return 'linux-x86-64'
+    } else if (osName.contains('mac')) {
+        if (osArch.contains('aarch64') || osArch.contains('arm64')) {
+            return 'darwin-aarch64'
+        }
+        return 'darwin-x86-64'
+    }
+    throw new GradleException("Unsupported OS: ${osName} ${osArch}")
+}
+
+tasks.named('build') {
+    mustRunAfter tasks.named('copyNatives')
+}
+
+// 릴리스 빌드용 (모든 플랫폼 라이브러리 포함)
+tasks.register('buildForRelease') {
+    description = 'Build with all platform native libraries'
+    group = 'build'
+    
+    dependsOn 'copyAllNatives', 'build'
+}
+
+tasks.register('copyAllNatives', Copy) {
+    description = 'Copy all platform native libraries'
+    group = 'build'
+    
+    from('natives-prebuilt') {
+        include '**/*.dll', '**/*.so', '**/*.dylib'
+    }
+    into 'java/src/main/resources/natives'
+}
+
+// Maven Publishing 설정
 publishing {
     publications {
         maven(MavenPublication) {
+            from components.java
+            
             groupId = 'io.github.kitstu17'
             artifactId = 'argon2-rust-jni'
-            version = '0.1.0'
-            
-            from components.java
+            version = '0.1.1'
             
             pom {
                 name = 'Argon2 Rust JNI'
-                description = 'High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot'
+                description = 'High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot, powered by Rust'
                 url = 'https://github.com/kitstu17/argon2-rust-jni'
                 
                 licenses {
@@ -237,27 +200,41 @@ publishing {
             }
         }
     }
-}
-
-// Nexus 배포 설정
-nexusPublishing {
+    
     repositories {
-        sonatype {
-            nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
-            snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
-            username = project.findProperty("ossrhUsername") ?: System.getenv("OSSRH_USERNAME")
-            password = project.findProperty("ossrhPassword") ?: System.getenv("OSSRH_PASSWORD")
+        maven {
+            name = "CentralPortal"
+            
+            // AUTOMATIC: 자동으로 Maven Central에 배포
+            // USER_MANAGED: 수동으로 Central Portal에서 승인 필요
+            def publishingType = version.endsWith('-SNAPSHOT') ? 'USER_MANAGED' : 'AUTOMATIC'
+            url = uri("https://central.sonatype.com/api/v1/publisher/upload?name=${project.group}:${project.name}:${project.version}&publishingType=${publishingType}")
+            
+            credentials {
+                username = project.findProperty("centralPortalUsername") ?: System.getenv("CENTRAL_PORTAL_USERNAME")
+                password = project.findProperty("centralPortalToken") ?: System.getenv("CENTRAL_PORTAL_TOKEN")
+            }
         }
     }
 }
 
 // Signing 설정
 signing {
-    def signingKey = project.findProperty("signingKey") ?: System.getenv("GPG_PRIVATE_KEY")
-    def signingPassword = project.findProperty("signingPassword") ?: System.getenv("GPG_PASSWORD")
-    
-    if (signingKey && signingPassword) {
+    // 로컬 테스트: 파일에서 읽기
+    def keyFile = file('gpg-private-key.asc')
+    if (keyFile.exists()) {
+        def signingKey = keyFile.text
+        def signingPassword = project.findProperty("signingPassword") ?: System.getenv("GPG_PASSWORD")
         useInMemoryPgpKeys(signingKey, signingPassword)
         sign publishing.publications.maven
+    } else {
+        // CI/CD: 환경변수에서 읽기
+        def signingKey = project.findProperty("signingKey") ?: System.getenv("GPG_PRIVATE_KEY")
+        def signingPassword = project.findProperty("signingPassword") ?: System.getenv("GPG_PASSWORD")
+        
+        if (signingKey && signingPassword) {
+            useInMemoryPgpKeys(signingKey, signingPassword)
+            sign publishing.publications.maven
+        }
     }
 }

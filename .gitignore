@@ -50,3 +50,7 @@ junit/
 
 # natives-prebuilt
 natives-prebuilt/
+
+# Maven Publish Test
+*.asc
+gradle.properties
