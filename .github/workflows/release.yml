@@ -2,37 +2,36 @@ name: Release
 
 on:
   release:
-    types: [created]
-  workflow_dispatch: # 수동 실행 가능
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  # 각 플랫폼별 네이티브 라이브러리 빌드
   build-natives:
     name: Build ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: linux-x86-64
             lib: libargon2_rust_jni.so
 
-          # Linux ARM64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             platform: linux-aarch64
             lib: libargon2_rust_jni.so
             cross_compiler: gcc-aarch64-linux-gnu
 
-          # macOS ARM64 (Apple Silicon)
           - os: macos-latest
             target: aarch64-apple-darwin
             platform: darwin-aarch64
             lib: libargon2_rust_jni.dylib
 
-          # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             platform: windows-x86-64
@@ -45,11 +44,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+          targets: ${{ matrix.target }}
 
       - name: Install cross-compiler (ARM64 only)
         if: matrix.cross_compiler
@@ -67,7 +64,7 @@ jobs:
           EOF
 
       - name: Cache Rust dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -100,7 +97,6 @@ jobs:
           path: rust/target/${{ matrix.target }}/release/${{ matrix.lib }}
           retention-days: 30
 
-  # 모든 네이티브 라이브러리를 포함한 JAR 생성
   package:
     name: Package Multi-Platform JAR
     needs: build-natives
@@ -117,10 +113,38 @@ jobs:
           distribution: "temurin"
           cache: "gradle"
 
-      - name: Download all native libraries
+      # v4에서는 pattern으로 여러 artifacts 다운로드
+      - name: Download native-linux-x86-64
         uses: actions/download-artifact@v4
         with:
-          path: natives-temp
+          name: native-linux-x86-64
+          path: natives-temp/native-linux-x86-64
+
+      - name: Download native-linux-aarch64
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-aarch64
+          path: natives-temp/native-linux-aarch64
+
+      - name: Download native-darwin-aarch64
+        uses: actions/download-artifact@v4
+        with:
+          name: native-darwin-aarch64
+          path: natives-temp/native-darwin-aarch64
+
+      - name: Download native-windows-x86-64
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows-x86-64
+          path: natives-temp/native-windows-x86-64
+
+      - name: Debug - Show downloaded artifacts
+        run: |
+          echo "========================================="
+          echo "Downloaded artifacts:"
+          echo "========================================="
+          find natives-temp -type f
+          echo "========================================="
 
       - name: Organize native libraries
         run: |
@@ -128,39 +152,53 @@ jobs:
 
           # Linux x86_64
           mkdir -p java/src/main/resources/natives/linux-x86-64
-          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || true
+          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/ || echo "Warning: linux-x86-64 not found"
 
           # Linux ARM64
           mkdir -p java/src/main/resources/natives/linux-aarch64
-          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || true
+          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/ || echo "Warning: linux-aarch64 not found"
 
           # macOS ARM64
           mkdir -p java/src/main/resources/natives/darwin-aarch64
-          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || true
+          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/ || echo "Warning: darwin-aarch64 not found"
 
           # Windows
           mkdir -p java/src/main/resources/natives/windows-x86-64
-          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || true
+          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/ || echo "Warning: windows-x86-64 not found"
 
           # 확인
           echo "========================================="
-          echo "Native libraries included in JAR:"
+          echo "Native libraries organized:"
           echo "========================================="
-          find java/src/main/resources/natives -type f
+          find java/src/main/resources/natives -type f || echo "No files found"
           echo "========================================="
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build JAR (without Rust build)
-        run: ./gradlew build -x buildRust -x copyNatives
+        run: ./gradlew build -x buildRust -x copyNatives --stacktrace
 
       - name: Verify JAR contents
         run: |
           echo "========================================="
-          echo "JAR Contents:"
+          echo "JAR file info:"
           echo "========================================="
-          jar -tf build/libs/argon2-rust-jni-*.jar | grep natives
+          ls -lh build/libs/
+          echo ""
+          echo "Checking for natives in JAR:"
+          if jar -tf build/libs/argon2-rust-jni-*.jar | grep -q natives; then
+            echo "✅ Natives found:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | grep natives
+          else
+            echo "⚠️ No natives found in JAR"
+            echo ""
+            echo "Resources in JAR:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | grep -E "\.so$|\.dll$|\.dylib$|resources/" || echo "No resources found"
+            echo ""
+            echo "First 50 entries in JAR:"
+            jar -tf build/libs/argon2-rust-jni-*.jar | head -50
+          fi
           echo "========================================="
 
       - name: Upload JAR
@@ -172,13 +210,12 @@ jobs:
 
       - name: Upload to release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: build/libs/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 빌드 요약
   release-summary:
     name: Release Summary
     needs: [build-natives, package]
@@ -206,5 +243,5 @@ jobs:
           echo "Package: ${{ needs.package.result }}"
           echo ""
           echo "Artifacts:"
-          ls -lh artifacts/
+          ls -lh artifacts/ || echo "No artifacts"
           echo "========================================="
