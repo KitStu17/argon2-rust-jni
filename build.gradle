@@ -200,22 +200,6 @@ publishing {
             }
         }
     }
-    
-    repositories {
-        maven {
-            name = "CentralPortal"
-            
-            // AUTOMATIC: 자동으로 Maven Central에 배포
-            // USER_MANAGED: 수동으로 Central Portal에서 승인 필요
-            def publishingType = version.endsWith('-SNAPSHOT') ? 'USER_MANAGED' : 'AUTOMATIC'
-            url = uri("https://central.sonatype.com/api/v1/publisher/upload?name=${project.group}:${project.name}:${project.version}&publishingType=${publishingType}")
-            
-            credentials {
-                username = project.findProperty("centralPortalUsername") ?: System.getenv("CENTRAL_PORTAL_USERNAME")
-                password = project.findProperty("centralPortalToken") ?: System.getenv("CENTRAL_PORTAL_TOKEN")
-            }
-        }
-    }
 }
 
 // Signing 설정
