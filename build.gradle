@@ -53,10 +53,8 @@ tasks.named('processResources') {
     dependsOn tasks.named('copyNatives')
 }
 
-// vanniktech plugin이 sourcesJar를 생성하므로 주석 처리
-// tasks.named('sourcesJar') {
-//     dependsOn tasks.named('processResources')
-// }
+// vanniktech plugin이 생성한 sourcesJar도 의존성 필요
+// afterEvaluate 블록은 아래 signing 설정과 통합됨
 
 tasks.named('jar') {
     mustRunAfter tasks.named('copyNatives')
@@ -201,9 +199,15 @@ mavenPublishing {
     }
 }
 
-// Signing 설정 (vanniktech plugin과 함께 사용)
-// afterEvaluate로 publication이 생성된 후에 설정
+// Signing 및 Task 의존성 설정
+// afterEvaluate로 publication과 tasks가 생성된 후에 설정
 afterEvaluate {
+    // sourcesJar 의존성 설정
+    tasks.named('sourcesJar') {
+        dependsOn tasks.named('processResources')
+    }
+
+    // Signing 설정
     signing {
         def signingKey = null
         def signingPassword = null
