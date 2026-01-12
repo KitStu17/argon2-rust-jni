@@ -216,104 +216,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-maven-central:
-    name: Publish to Maven Central
-    needs: package
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: github.event_name == 'release'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: "21"
-          distribution: "temurin"
-          cache: "gradle"
-
-      # 멀티플랫폼 네이티브 라이브러리 다운로드
-      - name: Download native-linux-x86-64
-        uses: actions/download-artifact@v4
-        with:
-          name: native-linux-x86-64
-          path: natives-temp/native-linux-x86-64
-
-      - name: Download native-linux-aarch64
-        uses: actions/download-artifact@v4
-        with:
-          name: native-linux-aarch64
-          path: natives-temp/native-linux-aarch64
-
-      - name: Download native-darwin-aarch64
-        uses: actions/download-artifact@v4
-        with:
-          name: native-darwin-aarch64
-          path: natives-temp/native-darwin-aarch64
-
-      - name: Download native-windows-x86-64
-        uses: actions/download-artifact@v4
-        with:
-          name: native-windows-x86-64
-          path: natives-temp/native-windows-x86-64
-
-      - name: Organize native libraries
-        run: |
-          mkdir -p java/src/main/resources/natives
-
-          # Linux x86_64
-          mkdir -p java/src/main/resources/natives/linux-x86-64
-          cp natives-temp/native-linux-x86-64/*.so java/src/main/resources/natives/linux-x86-64/
-
-          # Linux ARM64
-          mkdir -p java/src/main/resources/natives/linux-aarch64
-          cp natives-temp/native-linux-aarch64/*.so java/src/main/resources/natives/linux-aarch64/
-
-          # macOS ARM64
-          mkdir -p java/src/main/resources/natives/darwin-aarch64
-          cp natives-temp/native-darwin-aarch64/*.dylib java/src/main/resources/natives/darwin-aarch64/
-
-          # Windows
-          mkdir -p java/src/main/resources/natives/windows-x86-64
-          cp natives-temp/native-windows-x86-64/*.dll java/src/main/resources/natives/windows-x86-64/
-
-          # 확인
-          echo "Native libraries organized:"
-          find java/src/main/resources/natives -type f
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Publish to Maven Central
-        env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
-          ORG_GRADLE_PROJECT_signing.key: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signing.password: ${{ secrets.GPG_PASSWORD }}
-        run: |
-          ./gradlew publishAndReleaseToMavenCentral \
-            -x buildRust \
-            -x copyNatives \
-            --no-daemon \
-            --no-configuration-cache \
-            --stacktrace
-
-      - name: Publish Summary
-        if: always()
-        run: |
-          echo "========================================="
-          echo "Maven Central Publishing Complete"
-          echo "========================================="
-          echo "Check status at:"
-          echo "https://central.sonatype.com/artifact/io.github.kitstu17/argon2-rust-jni"
-          echo ""
-          echo "Note: It may take a few hours for the artifact to appear in Maven Central."
-          echo "========================================="
-
   release-summary:
     name: Release Summary
-    needs: [build-natives, package, publish-maven-central]
+    needs: [build-natives, package]
     runs-on: ubuntu-latest
     if: always()
 
@@ -336,8 +241,15 @@ jobs:
           echo "  - Windows x86_64: ${{ needs.build-natives.result }}"
           echo ""
           echo "Package: ${{ needs.package.result }}"
-          echo "Maven Central: ${{ needs.publish-maven-central.result }}"
           echo ""
           echo "Artifacts:"
           ls -lh artifacts/ || echo "No artifacts"
+          echo ""
+          echo "========================================="
+          echo "To publish to Maven Central manually:"
+          echo "========================================="
+          echo "1. Download native libraries from this release"
+          echo "2. Copy them to natives-prebuilt/ directory"
+          echo "3. Run: ./gradlew copyAllNatives"
+          echo "4. Run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache"
           echo "========================================="
