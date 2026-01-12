@@ -282,26 +282,22 @@ jobs:
           echo "Native libraries organized:"
           find java/src/main/resources/natives -type f
 
-      - name: Import GPG key
-        run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-        env:
-          GPG_TTY: $(tty)
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Publish to Maven Central
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
+          ORG_GRADLE_PROJECT_signing.key: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signing.password: ${{ secrets.GPG_PASSWORD }}
         run: |
-          ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository \
+          ./gradlew publishAndReleaseToMavenCentral \
             -x buildRust \
             -x copyNatives \
             --no-daemon \
+            --no-configuration-cache \
             --stacktrace
 
       - name: Publish Summary

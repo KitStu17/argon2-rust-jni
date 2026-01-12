@@ -1,8 +1,7 @@
 plugins {
     id 'java-library'
-    id 'maven-publish'
     id 'signing'
-    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
+    id 'com.vanniktech.maven.publish' version '0.30.0'
 }
 
 group = 'io.github.kitstu17'
@@ -163,79 +162,71 @@ tasks.register('copyAllNatives', Copy) {
     into 'java/src/main/resources/natives'
 }
 
-// Maven Publishing 설정
-publishing {
-    publications {
-        maven(MavenPublication) {
-            from components.java
-            
-            groupId = 'io.github.kitstu17'
-            artifactId = 'argon2-rust-jni'
-            version = '0.1.1'
-            
-            pom {
-                name = 'Argon2 Rust JNI'
-                description = 'High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot, powered by Rust'
-                url = 'https://github.com/kitstu17/argon2-rust-jni'
-                
-                licenses {
-                    license {
-                        name = 'The Apache License, Version 2.0'
-                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
-                    }
-                }
-                
-                developers {
-                    developer {
-                        id = 'kitstu17'
-                        name = 'kitstu17'
-                        url = 'https://github.com/kitstu17'
-                    }
-                }
-                
-                scm {
-                    connection = 'scm:git:git://github.com/kitstu17/argon2-rust-jni.git'
-                    developerConnection = 'scm:git:ssh://git@github.com/kitstu17/argon2-rust-jni.git'
-                    url = 'https://github.com/kitstu17/argon2-rust-jni'
-                }
+// Maven Publishing 설정 (vanniktech plugin)
+mavenPublishing {
+    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL, true)
+    signAllPublications()
+
+    coordinates("io.github.kitstu17", "argon2-rust-jni", "0.1.2")
+
+    pom {
+        name = 'Argon2 Rust JNI'
+        description = 'High-performance, memory-safe Argon2 password hashing library for Java/Spring Boot, powered by Rust'
+        url = 'https://github.com/kitstu17/argon2-rust-jni'
+        inceptionYear = '2025'
+
+        licenses {
+            license {
+                name = 'The Apache License, Version 2.0'
+                url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution = 'repo'
             }
         }
+
+        developers {
+            developer {
+                id = 'kitstu17'
+                name = 'kitstu17'
+                url = 'https://github.com/kitstu17'
+            }
+        }
+
+        scm {
+            connection = 'scm:git:git://github.com/kitstu17/argon2-rust-jni.git'
+            developerConnection = 'scm:git:ssh://git@github.com/kitstu17/argon2-rust-jni.git'
+            url = 'https://github.com/kitstu17/argon2-rust-jni'
+        }
     }
 }
 
-// Signing 설정
+// Signing 설정 (vanniktech plugin과 함께 사용)
 signing {
-    // 로컬 테스트: 파일에서 읽기
+    def signingKey = null
+    def signingPassword = null
+
+    // 1순위: 로컬 GPG 키 파일 (gpg-private-key.asc)
     def keyFile = file('gpg-private-key.asc')
     if (keyFile.exists()) {
-        def signingKey = keyFile.text
-        def signingPassword = project.findProperty("signingPassword") ?: System.getenv("GPG_PASSWORD")
+        println "Using GPG key from file: gpg-private-key.asc"
+        signingKey = keyFile.text
+        signingPassword = project.findProperty("signing.password") ?: System.getenv("GPG_PASSWORD")
+    }
+    // 2순위: gradle.properties의 signing.key 또는 환경변수
+    else {
+        signingKey = project.findProperty("signing.key") ?: System.getenv("GPG_PRIVATE_KEY")
+        signingPassword = project.findProperty("signing.password") ?: System.getenv("GPG_PASSWORD")
+
+        if (signingKey) {
+            println "Using GPG key from properties/environment"
+        }
+    }
+
+    // GPG 키가 있으면 in-memory 방식으로 서명 설정
+    if (signingKey && signingPassword) {
         useInMemoryPgpKeys(signingKey, signingPassword)
-        sign publishing.publications.maven
     } else {
-        // CI/CD: 환경변수에서 읽기
-        def signingKey = project.findProperty("signingKey") ?: System.getenv("GPG_PRIVATE_KEY")
-        def signingPassword = project.findProperty("signingPassword") ?: System.getenv("GPG_PASSWORD")
-
-        if (signingKey && signingPassword) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
-            sign publishing.publications.maven
-        }
+        println "WARNING: GPG signing not configured. Publications will not be signed."
+        println "  - For local: Create gpg-private-key.asc file or set signing.key/signing.password in gradle.properties"
+        println "  - For CI/CD: Set GPG_PRIVATE_KEY and GPG_PASSWORD environment variables"
     }
-}
-
-// Nexus Publishing 설정 (Maven Central)
-nexusPublishing {
-    repositories {
-        sonatype {
-            nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
-            snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
-            username = project.findProperty("sonatypeUsername") ?: System.getenv("SONATYPE_USERNAME")
-            password = project.findProperty("sonatypePassword") ?: System.getenv("SONATYPE_PASSWORD")
-        }
-    }
-
-    // 타임아웃 설정
-    connectTimeout = Duration.ofMinutes(3)
-    clientTimeout = Duration.ofMinutes(3)
 }
