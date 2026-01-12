@@ -200,38 +200,6 @@ mavenPublishing {
 }
 
 // Signing 설정 (vanniktech plugin과 함께 사용)
-// afterEvaluate로 publication이 생성된 후에 설정
-afterEvaluate {
-    signing {
-        def signingKey = null
-        def signingPassword = null
-
-        // 1순위: 로컬 GPG 키 파일 (gpg-private-key.asc)
-        def keyFile = file('gpg-private-key.asc')
-        if (keyFile.exists()) {
-            println "✓ Using GPG key from file: gpg-private-key.asc"
-            signingKey = keyFile.text
-            signingPassword = project.findProperty("signing.password") ?: System.getenv("GPG_PASSWORD")
-        }
-        // 2순위: gradle.properties의 signing.key 또는 환경변수
-        else {
-            signingKey = project.findProperty("signing.key") ?: System.getenv("GPG_PRIVATE_KEY")
-            signingPassword = project.findProperty("signing.password") ?: System.getenv("GPG_PASSWORD")
-
-            if (signingKey) {
-                println "✓ Using GPG key from properties/environment"
-            }
-        }
-
-        // GPG 키가 있으면 in-memory 방식으로 서명 설정
-        if (signingKey && signingPassword) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
-            // vanniktech plugin이 생성한 publication에 서명 적용
-            sign publishing.publications
-        } else {
-            println "⚠ WARNING: GPG signing not configured. Publications will not be signed."
-            println "  - For local: Create gpg-private-key.asc file or set signing.key/signing.password in gradle.properties"
-            println "  - For CI/CD: Set GPG_PRIVATE_KEY and GPG_PASSWORD environment variables"
-        }
-    }
+signing {
+    useInMemoryPgpKeys(findProperty("signingKey") as String, findProperty("signingPassword") as String)
 }
