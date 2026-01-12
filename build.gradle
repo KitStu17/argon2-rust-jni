@@ -201,5 +201,5 @@ mavenPublishing {
 
 // Signing 설정 (vanniktech plugin과 함께 사용)
 signing {
-    useInMemoryPgpKeys(findProperty("signingKey") as String, findProperty("signingPassword") as String)
+    useInMemoryPgpKeys(findProperty("signing.key") as String, findProperty("signing.password") as String)
 }
